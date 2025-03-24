@@ -1,0 +1,104 @@
+#!/bin/bash
+############################################################
+###       Scyne's Minecraft Server Control Script        ###
+## An easy way to manage a Minecraft server using `tmux`. ##
+############################################################
+
+# Ver 1.0
+
+# Configuration Variables
+MINECRAFT_DIR="/usr/local/games/minecraft_server/java"  # Define you install directory here
+SESSION_NAME="minecraft"
+TMUX_SOCKET="/tmp/minecraft-tmux"
+SERVER_JAR="paper.jar"  # Define your server .jar file here
+START_COMMAND="java -Xmx3072M -Xms2048M -XX:+UseG1GC -XX:MaxGCPauseMillis=50 -jar $SERVER_JAR nogui"  # Define start arguments here
+
+case "$1" in
+  start)
+    if pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+      echo -e "\e[3;33mA Minecraft server is already running.\e[0m"
+      echo -e "\e[3;33mUse 'serv console' to attach or 'serv restart' to restart.\e[0m"
+    else
+      # Create new session with explicit socket and proper directory
+      tmux -S $TMUX_SOCKET new-session -d -s $SESSION_NAME -c $MINECRAFT_DIR \
+        "cd $MINECRAFT_DIR && $START_COMMAND"
+      
+      # Set socket permissions
+      chmod 770 $TMUX_SOCKET
+      
+      sleep 3
+      if pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+        echo -e "\e[3;32mMinecraft Server started in background\e[0m"
+        echo -e "\e[3mUse 'serv console' to view the server console\e[0m"
+      else
+        echo -e "\e[3;31mFailed to start server! Check permissions:\e[0m"
+        echo -e "\e[3m1. Run: sudo chown -R $USER:$USER $MINECRAFT_DIR\e[0m"
+        echo -e "\e[3m2. Verify: ls -l $MINECRAFT_DIR/$SERVER_JAR\e[0m"
+      fi
+    fi
+    ;;
+  stop)
+    if pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+      tmux -S $TMUX_SOCKET send-keys -t $SESSION_NAME "stop" C-m
+      echo -e "\e[3;33mStopping Minecraft Server...\e[0m"
+      # Wait for process to end
+      sleep 5
+      if ! pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+        echo -e "\e[3;32mMinecraft Server stopped successfully\e[0m"
+      else
+        echo -e "\e[3;33mServer is shutting down. This may take a moment...\e[0m"
+      fi
+    else
+      echo -e "\e[3;31mNo Minecraft Server is currently running\e[0m"
+    fi
+    ;;
+  restart)
+    if pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+      tmux -S $TMUX_SOCKET send-keys -t $SESSION_NAME "stop" C-m
+      echo -e "\e[3;33mStopping Minecraft Server...\e[0m"
+      sleep 10
+      # Kill the session if it's still running
+      tmux -S $TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null
+    fi
+    
+    # Start a new session regardless of previous state
+    tmux -S $TMUX_SOCKET new-session -d -s $SESSION_NAME -c $MINECRAFT_DIR \
+      "cd $MINECRAFT_DIR && $START_COMMAND"
+    chmod 770 $TMUX_SOCKET
+    
+    echo -e "\e[3;32mMinecraft Server restarted in background\e[0m"
+    ;;
+  console)
+    if pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+      echo -e "\e[3mConnecting to Minecraft console. Press Ctrl+B then D to detach.\e[0m"
+      tmux -S $TMUX_SOCKET attach -t $SESSION_NAME
+    else
+      echo -e "\e[3;31mNo Minecraft Server is currently running\e[0m"
+      echo -e "\e[3mUse 'serv start' to start the server first\e[0m"
+    fi
+    ;;
+  status)
+    if pgrep -f "java.*$SERVER_JAR" > /dev/null; then
+        echo -e "\e[3;32mMinecraft Server is Online\e[0m"
+        uptime=$(ps -o etime= -p $(pgrep -f "java.*$SERVER_JAR"))
+        echo -e "\e[3mRunning for: $uptime\e[0m"
+        
+        # Show memory usage
+        mem_usage=$(ps -o %mem= -p $(pgrep -f "java.*$SERVER_JAR"))
+        echo -e "\e[3mMemory usage: $mem_usage%\e[0m"
+        
+        # Query player count using mcstatus (if installed)
+        if command -v mcstatus >/dev/null 2>&1; then
+            players=$(mcstatus localhost status | grep -oP 'players: \K\d+/\d+')
+            echo -e "\e[3mPlayers: $players\e[0m"
+        else
+            echo -e "\e[3;33mPlayer count unavailable. Install mcstatus: 'pip install mcstatus'\e[0m"
+        fi
+    else
+        echo -e "\e[3;31mMinecraft Server is OFFLINE!!!\e[0m"
+    fi
+    ;;
+  *)
+    echo -e "\e[3mServer Control Commands: serv {start|stop|restart|console|status}\e[0m"
+    ;;
+esac
